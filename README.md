@@ -58,9 +58,48 @@ mkdir build && cd builid && cmake .. && make
 ```
 ![alt text](img/mysqlpool模型.png)
 #### 核心代码
-Connection.cc
+**Connection.cc**
+```
+Connection.cc使用mysql.h库提供的原生数据库连接与查询接口，对外封装了三个接口:
 
-CommonConnectionPool.cc
+//1)
+Connection::connect(std::string ip,
+        unsigned short port,
+        std::string user,
+        std::string password,
+        std::string dbname);//建立连接
+
+//2)
+/// @brief 执行更新操作 insert/delete/update
+bool update(std::string sql);
+
+//3)
+/// @brief 执行查询操作
+MYSQL_RES* query(std::string sql);
+
+
+```
+**ConnectionPool.cc**使用了下面列出的设计方式
+```
+
+1、数据库连接池使用单例模式，为了保证线程安全，使用懒汉初始化方式。
+
+2、为了提高连接池的可用性，新开两个线程：
+一个生产者线程专门向装连接的队列中生产数据库连接（在连接不够用时且存活的连接数小于maxSize_）
+一个定时线程，检查队列首部的连接，如果其空闲时间大于定义的最大空闲时间，将该条连接取出并释放（在连接数大于initSize_）。
+
+3、线程间互斥与通信
+线程间使用互斥信号量std::mutex以及std::unique_lock<>来实现对连接队列的互斥访问
+线程间使用条件变量进行通信
+
+4、使用智能指针std::shared_ptr<>来管理连接的生命周期
+
+等等
+
+```
+
+
+
 
 #### 连接池压力测试
 ```
@@ -73,6 +112,7 @@ CommonConnectionPool.cc
 | -------------- | ------------ |
 | 服务商         | 腾讯云   |
 | 实例类型       | 轻量应用服务器 |
+| 操作系统       | 	Ubuntu Server 22.04 LTS 64bit |
 | CPU 核数       | 2            |
 | 内存大小       | 2 GB           |
 | 存储类型       | SSD           |
@@ -93,4 +133,9 @@ MySQL version:mysql  Ver 8.0.36-0ubuntu0.22.04.1 for Linux on x86_64 ((Ubuntu))
 | 10000    | 144144               | 52057                 | 73607                 | 22838                |
 
 
-压力测试代码
+**结论：**
+```
+在服务器上测得的mysql操作耗时是否准确先不谈论，但是在同样环境下，使用数据库连接池后，在同样调用10000次sql的情况下
+1、单线程下：平均每条sql语句的耗时由原来的14.4144ms下降到7.3607ms
+2、4线程：平均每条sql语句的耗时由5.2057ms下降到2.2838ms
+```
